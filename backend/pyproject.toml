@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=75.6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pfa-accounting"
+version = "0.1.0"
+description = "Multi-tenant Romanian PFA accounting, tax calculation and ANAF reporting"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "sqlalchemy[asyncio]==2.0.36",
+    "asyncpg==0.30.0",
+    "alembic==1.14.0",
+    "greenlet==3.1.1",
+    "PyJWT[crypto]==2.10.1",
+    "argon2-cffi==23.1.0",
+    "python-multipart==0.0.20",
+    "email-validator==2.2.0",
+    "httpx==0.28.1",
+    "lxml==5.3.0",
+    "Jinja2==3.1.5",
+    # OpenTelemetry: traces, metrics and trace context in logs (SDK and
+    # instrumentation are released in lockstep: bump them together)
+    "opentelemetry-api==1.45.2",
+    "opentelemetry-sdk==1.45.2",
+    "opentelemetry-exporter-otlp-proto-http==1.45.2",
+    "opentelemetry-instrumentation-fastapi==0.66b2",
+    "opentelemetry-instrumentation-sqlalchemy==0.66b2",
+    "opentelemetry-instrumentation-httpx==0.66b2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "pytest-cov==6.0.0",
+    "ruff==0.8.4",
+    "PyYAML==6.0.2",
+]
+
+[tool.setuptools]
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pfa*"]
+
+# static assets shipped with the service: vendored Swagger UI and the official ANAF
+# form schemas used to validate declaration artifacts
+[tool.setuptools.package-data]
+pfa = ["static/swagger-ui/*", "static/schemas/anaf/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error::DeprecationWarning:pfa.*"]
+markers = [
+    "postgres: requires a PostgreSQL instance (see PFA_TEST_DATABASE_URL)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "B008",   # FastAPI dependencies are function calls by design
+    "RUF001", # Romanian diacritics in user-facing strings are intentional
+    "RUF012",
+    "SIM102",
+    "SIM108",
+    "E501",   # long user-facing Romanian strings and SQL
+    "UP038",
+]

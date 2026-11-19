@@ -1,0 +1,137 @@
+// Grafana Alloy: production example for Docker hosts.
+//
+// Collects stdout/stderr of every container labelled `pfa.logs=true` (the API,
+// the worker and, when split, the OAuth server; all run with PFA_ENV=production,
+// which defaults to JSON logs) and ships them to Loki.  It also receives the
+// processes' OTLP traces and metrics (set OTEL_EXPORTER_OTLP_ENDPOINT=http://<alloy>:4318
+// on them) and forwards them to the OTLP endpoint of your backend
+// (OTLP_ENDPOINT: Tempo/Mimir, Grafana Cloud, or any OpenTelemetry-compatible store).
+//
+// Run Alloy on each host with the Docker socket mounted read-only and
+//   LOKI_URL=https://<loki>/loki/api/v1/push
+// (plus LOKI_USERNAME / LOKI_PASSWORD for Grafana Cloud or an authenticating
+// gateway).  Kubernetes: use the Grafana `k8s-monitoring` Helm chart with the same
+// loki.process block.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "pfa" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_pfa_logs"]
+    regex         = "true"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "pfa" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.pfa.output
+  forward_to = [loki.process.pfa.receiver]
+}
+
+loki.process "pfa" {
+  // launcher banners, Vite and the uvicorn reloader are plain text: not events
+  stage.drop {
+    expression          = "^[^{]"
+    drop_counter_reason = "not_json"
+  }
+
+  // OpenTelemetry-aligned keys contain dots: JMESPath needs them quoted
+  stage.json {
+    expressions = {
+      ts       = "timestamp",
+      level    = "severity_text",
+      service  = "\"service.name\"",
+      env      = "\"deployment.environment.name\"",
+      event    = "\"event.name\"",
+      trace_id = "trace_id",
+    }
+  }
+
+  // the event's own time, not the time Alloy read the line
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339"
+  }
+
+  // Loki convention: lowercase levels (info, warn, error...)
+  stage.template {
+    source   = "level"
+    template = "{{ ToLower .Value }}"
+  }
+
+  // low-cardinality fields only; everything else stays in the JSON body and is
+  // extracted at query time with `| json`
+  stage.labels {
+    values = {
+      service_name = "service",
+      env          = "",
+      level        = "",
+      event        = "",
+    }
+  }
+
+  // high-cardinality but indexed for lookups: jump from a log line to its trace
+  stage.structured_metadata {
+    values = {
+      trace_id = "",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = sys.env("LOKI_URL")
+
+    basic_auth {
+      username = sys.env("LOKI_USERNAME")
+      password = sys.env("LOKI_PASSWORD")
+    }
+  }
+}
+
+otelcol.receiver.otlp "apps" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces  = [otelcol.processor.batch.default.input]
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    traces  = [otelcol.exporter.otlphttp.backend.input]
+    metrics = [otelcol.exporter.otlphttp.backend.input]
+  }
+}
+
+otelcol.auth.basic "backend" {
+  username = sys.env("OTLP_USERNAME")
+  password = sys.env("OTLP_PASSWORD")
+}
+
+otelcol.exporter.otlphttp "backend" {
+  client {
+    endpoint = sys.env("OTLP_ENDPOINT")
+    auth     = otelcol.auth.basic.backend.handler
+  }
+}

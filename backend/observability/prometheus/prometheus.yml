@@ -1,0 +1,11 @@
+# Prometheus: metrics pushed over OTLP by the PFA processes (through Alloy) and
+# span metrics remote-written by Tempo.  Nothing is scraped.
+global:
+  evaluation_interval: 30s
+
+otlp:
+  # resource attributes that become labels on every series
+  promote_resource_attributes:
+    - service.name
+    - service.version
+    - deployment.environment.name

@@ -1,0 +1,11 @@
+swagger-ui-dist@5.18.2 (Apache-2.0) - copied verbatim, no modification.
+
+  c50b94bbc4f02394326fb7aed1f4fb693b3677f4b3d3344e0d6131808cbf281f  swagger-ui-bundle.js
+  8f33d996025317049d4a9864f421eab2b2a247872f388026fa94c654913259e7  swagger-ui.css
+  3ed612f41e050ca5e7000cad6f1cbe7e7da39f65fca99c02e99e6591056e5837  favicon-32x32.png
+  af24ad604dd7b3bcda8f975ab973075f4a2f70a4087944a12f8ef8b63a3e07c2  favicon-16x16.png
+  cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30  LICENSE
+  0d20d1adef18aee3f40dd258172155521ce702ac445cb5f7b7d60ed32dad2fb2  NOTICE
+
+Not copied: source maps, standalone preset, index.html, oauth2-redirect.html.
+Refresh with: SWAGGER_UI_TARGET_DIR=../backend/pfa/static/swagger-ui npm run vendor:swagger-ui

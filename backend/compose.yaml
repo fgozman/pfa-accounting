@@ -1,0 +1,39 @@
+# Development Compose project.
+#
+#   cp .env.example .env
+#   docker compose up -d --wait postgres
+#
+# PostgreSQL is pinned to a supported major version and release digest.
+# The volume is a named development volume: `docker compose down` keeps it,
+# `docker compose down -v` is the explicit destructive reset.
+name: pfa-accounting
+
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    container_name: pfa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pfa}
+      POSTGRES_USER: ${POSTGRES_OWNER_USER:-pfa_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD:-dev_owner_password}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-pfa_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-dev_app_password}
+      POSTGRES_OAUTH_DB: ${POSTGRES_OAUTH_DB:-pfa_oauth}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      # 127.0.0.1 only: never expose the development database on the network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pfa-pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  pfa-pgdata:
+    name: pfa-pgdata

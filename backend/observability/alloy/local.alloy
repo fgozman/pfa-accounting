@@ -1,0 +1,115 @@
+// Grafana Alloy for local evaluation: logs to Loki, traces to Tempo, metrics to
+// Prometheus.
+//
+// * Logs: tails backend/.run/*.log (mounted at /var/log/pfa), where the dev stack
+//   writes JSON with `make dev-json-logs`.  Production collects container stdout
+//   instead (production-docker.alloy).
+// * Traces and metrics: OTLP on 127.0.0.1:4317 (gRPC) / 4318 (HTTP); the dev
+//   processes push there when OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318.
+
+local.file_match "pfa" {
+  path_targets = [{"__path__" = "/var/log/pfa/*.log", "source" = "file"}]
+  sync_period  = "5s"
+}
+
+loki.source.file "pfa" {
+  targets    = local.file_match.pfa.targets
+  forward_to = [loki.process.pfa.receiver]
+}
+
+loki.process "pfa" {
+  // launcher banners, Vite and the uvicorn reloader are plain text: not events
+  stage.drop {
+    expression          = "^[^{]"
+    drop_counter_reason = "not_json"
+  }
+
+  // OpenTelemetry-aligned keys contain dots: JMESPath needs them quoted
+  stage.json {
+    expressions = {
+      ts       = "timestamp",
+      level    = "severity_text",
+      service  = "\"service.name\"",
+      env      = "\"deployment.environment.name\"",
+      event    = "\"event.name\"",
+      trace_id = "trace_id",
+    }
+  }
+
+  // the event's own time, not the time Alloy read the line
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339"
+  }
+
+  // Loki convention: lowercase levels (info, warn, error...)
+  stage.template {
+    source   = "level"
+    template = "{{ ToLower .Value }}"
+  }
+
+  // low-cardinality fields only; everything else stays in the JSON body and is
+  // extracted at query time with `| json`
+  stage.labels {
+    values = {
+      service_name = "service",
+      env          = "",
+      level        = "",
+      event        = "",
+    }
+  }
+
+  // high-cardinality but indexed for lookups: jump from a log line to its trace
+  stage.structured_metadata {
+    values = {
+      trace_id = "",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+otelcol.receiver.otlp "apps" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces  = [otelcol.processor.batch.default.input]
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    metrics = [otelcol.exporter.otlphttp.prometheus.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// Prometheus 3 ingests OTLP natively (/api/v1/otlp/v1/metrics)
+otelcol.exporter.otlphttp "prometheus" {
+  client {
+    endpoint = "http://prometheus:9090/api/v1/otlp"
+  }
+}
